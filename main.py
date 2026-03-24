@@ -6,7 +6,7 @@ import os
 
 app = FastAPI()
 
-# CORS
+# CORS erlauben
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,26 +15,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# YOLO Modell laden
 model = YOLO("yolov8n.pt")
 
 @app.post("/detect")
 async def detect(request: Request):
     try:
-        # App Inventor sendet das File ohne Key
+        # Alle Form-Felder abfragen
         form = await request.form()
-        file = None
+        file_field = None
         for key in form.keys():
-            file = form[key]
+            file_field = form[key]
             break
-        if file is None:
+
+        if file_field is None:
             return {"error": "No file received"}
 
-        # Temp-Pfad auf Render
-        temp_path = "/tmp/temp.jpg" if os.name != "nt" else "temp.jpg"
-        with open(temp_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        # Prüfen, ob file_field ein UploadFile ist (Swagger) oder ein String (App Inventor)
+        if hasattr(file_field, "file"):
+            # UploadFile → Inhalt kopieren
+            temp_path = "/tmp/temp.jpg" if os.name != "nt" else "temp.jpg"
+            with open(temp_path, "wb") as buffer:
+                shutil.copyfileobj(file_field.file, buffer)
+        else:
+            # App Inventor PostFile liefert nur den Pfad → direkt verwenden
+            temp_path = file_field
+            if temp_path.startswith("file://"):
+                temp_path = temp_path.replace("file://", "")  # Android Pfad anpassen
 
-        # YOLO
+        # YOLO Vorhersage
         results = model(temp_path)
         detections = []
         for r in results:
@@ -47,6 +56,7 @@ async def detect(request: Request):
                 })
 
         return {"detections": detections}
+
     except Exception as e:
-        # Fehler zurückgeben
+        # Fehler sauber zurückgeben
         return {"error": str(e)}
