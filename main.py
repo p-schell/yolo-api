@@ -2,10 +2,11 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from ultralytics import YOLO
 import shutil
+import os
 
 app = FastAPI()
 
-# CORS erlauben (für App Inventor)
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -14,35 +15,38 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# YOLO Modell laden
-model = YOLO("yolov8n.pt")  # kleines, schnelles Modell
+model = YOLO("yolov8n.pt")
 
 @app.post("/detect")
 async def detect(request: Request):
-    # Versuche, die hochgeladene Datei zu bekommen
-    form = await request.form()
-    file = None
-    for key in form.keys():
-        file = form[key]
-        break  # nur das erste File verwenden
+    try:
+        # App Inventor sendet das File ohne Key
+        form = await request.form()
+        file = None
+        for key in form.keys():
+            file = form[key]
+            break
+        if file is None:
+            return {"error": "No file received"}
 
-    if file is None:
-        return {"error": "No file received"}
+        # Temp-Pfad auf Render
+        temp_path = "/tmp/temp.jpg" if os.name != "nt" else "temp.jpg"
+        with open(temp_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
 
-    # Bild temporär speichern
-    with open("temp.jpg", "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        # YOLO
+        results = model(temp_path)
+        detections = []
+        for r in results:
+            for box in r.boxes:
+                detections.append({
+                    "class": int(box.cls[0]),
+                    "class_name": model.names[int(box.cls[0])],
+                    "confidence": float(box.conf[0]),
+                    "bbox": box.xyxy[0].tolist()
+                })
 
-    # YOLO Vorhersage
-    results = model("temp.jpg")
-    detections = []
-    for r in results:
-        for box in r.boxes:
-            detections.append({
-                "class": int(box.cls[0]),
-                "class_name": model.names[int(box.cls[0])],
-                "confidence": float(box.conf[0]),
-                "bbox": box.xyxy[0].tolist()
-            })
-
-    return {"detections": detections}
+        return {"detections": detections}
+    except Exception as e:
+        # Fehler zurückgeben
+        return {"error": str(e)}
