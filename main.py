@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from ultralytics import YOLO
 import shutil
@@ -18,12 +18,22 @@ app.add_middleware(
 model = YOLO("yolov8n.pt")  # kleines, schnelles Modell
 
 @app.post("/detect")
-async def detect(file: UploadFile = File(...)):
+async def detect(request: Request):
+    # Versuche, die hochgeladene Datei zu bekommen
+    form = await request.form()
+    file = None
+    for key in form.keys():
+        file = form[key]
+        break  # nur das erste File verwenden
+
+    if file is None:
+        return {"error": "No file received"}
+
     # Bild temporär speichern
     with open("temp.jpg", "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    # Vorhersage
+    # YOLO Vorhersage
     results = model("temp.jpg")
     detections = []
     for r in results:
@@ -34,4 +44,5 @@ async def detect(file: UploadFile = File(...)):
                 "confidence": float(box.conf[0]),
                 "bbox": box.xyxy[0].tolist()
             })
+
     return {"detections": detections}
