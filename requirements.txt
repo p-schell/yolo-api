@@ -1,0 +1,4 @@
+ultralytics
+fastapi[all]
+uvicorn
+python-multipart
