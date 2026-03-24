@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from ultralytics import YOLO
 import shutil
 import os
+import uuid
 
 app = FastAPI()
 
@@ -31,19 +32,21 @@ async def detect(request: Request):
         if file_field is None:
             return {"error": "No file received"}
 
-        # Prüfen, ob file_field ein UploadFile ist (Swagger) oder ein String (App Inventor)
+        # Jeder Upload bekommt einen eindeutigen temporären Pfad
+        temp_path = f"/tmp/{uuid.uuid4().hex}.jpg" if os.name != "nt" else f"temp_{uuid.uuid4().hex}.jpg"
+
+        # Prüfen, ob UploadFile oder App Inventor PostFile
         if hasattr(file_field, "file"):
-            # UploadFile → Inhalt kopieren
-            temp_path = "/tmp/temp.jpg" if os.name != "nt" else "temp.jpg"
+            # UploadFile (Swagger)
             with open(temp_path, "wb") as buffer:
                 shutil.copyfileobj(file_field.file, buffer)
         else:
-            # App Inventor PostFile liefert nur den Pfad → direkt verwenden
+            # App Inventor liefert nur Pfad
             temp_path = file_field
             if temp_path.startswith("file://"):
-                temp_path = temp_path.replace("file://", "")  # Android Pfad anpassen
+                temp_path = temp_path.replace("file://", "")
 
-        # YOLO Vorhersage
+        # YOLO-Vorhersage
         results = model(temp_path)
         detections = []
         for r in results:
@@ -54,6 +57,13 @@ async def detect(request: Request):
                     "confidence": float(box.conf[0]),
                     "bbox": box.xyxy[0].tolist()
                 })
+
+        # Optional: temporäre Datei löschen
+        try:
+            if os.path.exists(temp_path) and os.name != "nt":  # Nicht auf Android löschen
+                os.remove(temp_path)
+        except:
+            pass
 
         return {"detections": detections}
 
